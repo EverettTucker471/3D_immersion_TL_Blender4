@@ -104,7 +104,7 @@ def create_particle_system(name, particle_object_name):
     psys.phase_factor_random = 2
     psys.particle_size = 1
     psys.size_random = 0.5
-    psys.count = 1000
+    psys.count = 400
     psys.use_emit_random = True
     psys.use_modifier_stack = True
     psys.use_even_distribution = False
@@ -272,7 +272,8 @@ def addSide(objName, mat):
             vert.select_set(True)
             vert.co[2] = zmin - fringe
 
-    bmesh.update_edit_mesh(me, True)
+    # Changing, not sure if this is loop_triangles or destruction
+    bmesh.update_edit_mesh(me, loop_triangles=True)
 
     def NormalInDirection(normal, direction, limit=0.5):
         return direction.dot(normal) > limit
@@ -435,11 +436,7 @@ def adjust3Dview(object):
                 if dst > 10000000:
                     dst = 10000000  # too large clip distance broke the 3d view
                 space.clip_end = dst
-            overrideContext = bpy.context.copy()
-            overrideContext["area"] = area
-            overrideContext["region"] = area.regions[-1]
-            bpy.ops.view3d.view_selected(overrideContext)
-
+            bpy.ops.view3d.view_selected()  # Removed context
 
 class Adapt:
     def __init__(self):
@@ -453,24 +450,32 @@ class Adapt:
         self.dimensions = None
 
     def terrainChange(self, path, CRS):
+        print("Changing terrain")
         # TODO: apply previous particle systems
         adjust_view = True
         if bpy.data.objects.get(self.plane):
             adjust_view = False
         remove_object(self.plane)
+        print("Importing Georaster")
+        print(f"Calling import with CRS: {CRS} and path {path}")
         bpy.ops.importgis.georaster(
             filepath=path,
             importMode="DEM",
             subdivision="mesh",
             step=2,
             rastCRS=CRS,
+            # reprojection=False,
         )
+        print([obj.name for obj in bpy.data.objects])
+        print(f'Location: {bpy.data.objects["terrain"].location}')
+        print("Assigning materials")
         select_only(self.plane)
         bpy.ops.object.convert(target="MESH")
         self.dimensions = bpy.data.objects["terrain"].dimensions
         assign_material(self.plane, material_name="terrain_material")
         addSide(self.plane, "terrain_material")
         os.remove(path)
+        print("Adjusting view")
         if adjust_view:
             t = bpy.data.objects.get(self.plane)
             adjust3Dview(t)
@@ -525,7 +530,9 @@ class Adapt:
             terrain.modifiers.remove(terrain.modifiers[-1])
         for patch_file in patch_files:
             path = os.path.join(watchFolder, patch_file)
+            print(f"Running trees with path: {path}")
             patch_type = os.path.splitext(patch_file)[0].split("_")[1]
+            print(f'This patch has type: {patch_type}')
             if bpy.data.images.get(patch_file):
                 bpy.data.images.remove(bpy.data.images[patch_file])
             bpy.data.textures[patch_type].image = bpy.data.images.load(path)
@@ -581,6 +588,7 @@ class ModalTimerOperator(bpy.types.Operator):
         # this condition encomasses all the actions required for watching
         # the folder and related file/object operations .
 
+        print(f"Model run with: {event}")
         if event.type == "TIMER":
 
             if self._timer.time_duration != self._timer_count:
@@ -602,8 +610,8 @@ class ModalTimerOperator(bpy.types.Operator):
                             patch_files.append(f)
                     if patch_files:
                         self.adapt.trees(patch_files, self.prefs.watchFolder)
-                except RuntimeError:
-                    pass
+                except RuntimeError as e:
+                    print(f"Error: {e}")
 
         return {"PASS_THROUGH"}
 

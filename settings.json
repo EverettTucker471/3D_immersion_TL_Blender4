@@ -1,8 +1,8 @@
 {
-	"folder": "/home/anna/Projects/blender/",
+	"folder": "/home/everetttucker471/IGroup/TL_coupling",
 	"CRS": "3358",
 	"timer": 5,
-	"scale": 1,
+	"scale": 0.05,
 	"terrain": {
 		"grass_texture_file": "textures/grass_final.jpg",
 		"sides_texture_file": "textures/dirt.jpg"
