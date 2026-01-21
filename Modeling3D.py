@@ -69,6 +69,8 @@ def load_objects_from_file(filepath, scale=1):
         bpy.context.collection.objects.link(obj)
         names.append(obj.name)
         obj.scale *= scale
+        print(f"Standardizing rotation for {obj.name}")
+        obj.rotation_euler = (0, 0, 0)  # Standardizing rotation
         obj.hide_set(True)
     return names
 
@@ -99,12 +101,14 @@ def create_particle_system(name, particle_object_name):
     psys.distribution = "RAND"
     psys.render_type = "OBJECT"
     psys.use_rotations = True
-    psys.rotation_mode = "OB_Z"
-    psys.use_rotation_instance = True
-    psys.phase_factor_random = 2
+    psys.rotation_mode = "OB_Y"
+    psys.use_rotation_instance = False
+    psys.phase_factor_random = 0.0
+    psys.rotation_factor_random = 0.1
+    psys.physics_type = "NO"
     psys.particle_size = 1
     psys.size_random = 0.5
-    psys.count = 400
+    psys.count = 3000
     psys.use_emit_random = True
     psys.use_modifier_stack = True
     psys.use_even_distribution = False
@@ -225,6 +229,10 @@ def add_sun():
 
 def addSide(objName, mat):
     ter = bpy.data.objects[objName]
+    if ter.data.validate():
+        print("Mesh is valid to Blender")
+    else:
+        print("Invalid starting mesh!")
     fringe = ter.dimensions.x / 20
     ter.select_set(True)
 
@@ -235,10 +243,15 @@ def addSide(objName, mat):
     if ter.mode == "EDIT":
         bm = bmesh.from_edit_mesh(ter.data)
         vertices = bm.verts
-
     else:
         vertices = ter.data.vertices
 
+    print("Applicable Modifiers in Failure")
+    for mod in ter.modifiers:
+        print(mod.name, mod.type)
+    print([x.co for x in vertices[:10]])
+    # Can do overloaded operators for magnitude computation
+    print(f"Number of Non-Zero Vertices: {sum([1 for x in vertices if x.co > 0])}")
     verts = [ter.matrix_world @ vert.co for vert in vertices]
 
     dic = {"x": [], "y": [], "z": []}
@@ -468,6 +481,14 @@ class Adapt:
         )
         print([obj.name for obj in bpy.data.objects])
         print(f'Location: {bpy.data.objects["terrain"].location}')
+        
+        # DEBUGGING - Data is clean and non-null here
+        ter = bpy.data.objects["terrain"]
+        print([x.co for x in ter.data.vertices[:10]])
+        print("Applicable Modifiers in Success")
+        for mod in ter.modifiers:
+            print(mod.name, mod.type)
+
         print("Assigning materials")
         select_only(self.plane)
         bpy.ops.object.convert(target="MESH")
@@ -526,7 +547,9 @@ class Adapt:
         except KeyError:
             print("no terrain for particles")
             return
+        print("Running trees but keeping modifiers")
         while terrain.modifiers:
+            print(f"Removing: {terrain.modifiers[-1]}")
             terrain.modifiers.remove(terrain.modifiers[-1])
         for patch_file in patch_files:
             path = os.path.join(watchFolder, patch_file)
@@ -588,7 +611,7 @@ class ModalTimerOperator(bpy.types.Operator):
         # this condition encomasses all the actions required for watching
         # the folder and related file/object operations .
 
-        print(f"Model run with: {event}")
+        # print(f"Model run with: {event}")
         if event.type == "TIMER":
 
             if self._timer.time_duration != self._timer_count:
@@ -596,6 +619,7 @@ class ModalTimerOperator(bpy.types.Operator):
                 fileList = os.listdir(self.prefs.watchFolder)
                 try:
                     if terrainFile in fileList:
+                        print(f"Terrain changing with CRS: {self.prefs.CRS}")
                         self.adapt.terrainChange(self.prefs.terrainPath, self.prefs.CRS)
                     if waterFile in fileList:
                         self.adapt.waterFill(self.prefs.water_path, self.prefs.CRS)
@@ -718,6 +742,7 @@ class TL_OT_Assets(bpy.types.Operator):
         load_objects_from_file(prefs.profile, scale=prefs.scale)
         for each in prefs.trees:
             tree_names = load_objects_from_file(prefs.trees[each]["model"], scale=prefs.scale)
+
             create_particle_system(each, particle_object_name=tree_names[0])
 
         return {"FINISHED"}

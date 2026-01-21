@@ -19,5 +19,5 @@ zip -r "$ZIP_PATH" $REPO_NAME -x "*/.*" "reload" "scratch" "Watch" "zip"
 # Installing the addon and configuring
 blender --background --python "$TL_COUPLING/$REPO_NAME/reload/reinstall_addon.py" -- --addon_zip_path "$ZIP_PATH" --tl_coupling_path "$TL_COUPLING" --addon_name "$REPO_NAME"
 
-# Reopening blender
-/opt/blender-4.5.3-linux-x64/blender
+# Reopening blender 5.0, assuming it's sourced correctly
+blender
