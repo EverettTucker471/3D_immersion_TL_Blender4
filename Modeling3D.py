@@ -27,6 +27,7 @@ VIEW_INCREASE_FACTOR: Final[int] = 5
 SUN_INCREASE_FACTOR: Final[int] = 2
 TEXTURE_MAPPING_SCALE: Final[int] = 3
 TERRAIN_ROUGHNESS: Final[float] = 0.8
+SLOPE_LIMIT: Final[float] = 0.7  # Limit for defining what counts as a side
 
 # Initial Parameters for the Sun
 SUN_ENERGY: Final[int] = 2
@@ -103,16 +104,15 @@ class Adapt:
             rastCRS=CRS,
         )
 
+        # Convert the terrain to a Blender mesh for manipulation
         select_only(self.plane)
         bpy.ops.object.convert(target="MESH")
 
-        # TODO: Consider remeshing here to increase performance
+        # Add sides to the terrain
+        self.dimensions = bpy.data.objects[self.plane].dimensions
+        add_side(self.plane, "terrain_sides_material")
 
-        self.dimensions = bpy.data.objects["terrain"].dimensions
-        assign_material(self.plane, materialName="terrain_material")
-        add_side(self.plane, "terrain_material")
-
-        # Removing the file
+        # Removing the terrain file
         os.remove(path)
 
         # Adjusting view if necessary
@@ -265,7 +265,10 @@ class MessageOperator(bpy.types.Operator):
 def remove_object(objectName: str) -> bpy.types.Object:
     obj = bpy.data.objects.get(objectName)
     if obj:
-        bpy.data.objects.remove(obj)
+        mesh = obj.data
+        bpy.data.objects.remove(obj)  # Removing object
+        if obj and mesh.users == 0:
+            bpy.data.meshes.remove(mesh)  # Removing mesh if orphaned
         return obj
     return None
     
@@ -283,98 +286,66 @@ def select_only(objectName: str) -> bpy.types.Object:
     return None
 
 
-def assign_material(objectName: str, materialName: str) -> bool:
-    obj = bpy.data.objects.get(objectName)
-    mat = bpy.data.materials.get(materialName)
-
-    # Checks for object and material  
-    if not obj or not mat:
-        return False
-    
-    # Assigning the material to the object
-    obj.data.materials.append(mat)
-    numMat = len(obj.data.materials)
-
-    # Making sure it gets the most recent material
-    if numMat > 1:
-        obj.active_material_index = numMat - 1
-        bpy.ops.object.material_slot_assign()
-
-
 def add_side(objectName: str, materialName: str) -> None:
     terrain = bpy.data.objects.get(objectName)
     fringe = terrain.dimensions.x / 20
-    terrain.select_set(True)
-
-    bpy.ops.object.mode_set(mode="EDIT")
-    bpy.ops.mesh.select_all(action="DESELECT")
     mesh = terrain.data
 
-    if terrain.mode == "EDIT":
-        bm = bmesh.from_edit_mesh(terrain.data)
-        vertices = bm.verts
-    else:
-        vertices = mesh.verties
+    # Creating and assigning materials if necessary
+    if len(terrain.data.materials) != 2:
+        # Should just be able to leave this state like this for the duration of the run.
+        terrain_mat = bpy.data.materials.get("terrain_material")
+        terrain_sides_mat = bpy.data.materials.get("terrain_sides_material")
+        terrain.data.materials.clear()
+        terrain.data.materials.append(terrain_mat)  # index 0
+        terrain.data.materials.append(terrain_sides_mat)  # Index 1
 
-    verts = [terrain.matrix_world @ vert.co for vert in vertices]
+    # Creating a bmesh copy of the terrain for updates
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
 
-    dic = {"x": [], "y": [], "z": []}
-    for vert in verts:
-        if not math.isnan(vert[0]):
-            dic["x"].append(vert[0])
-            dic["y"].append(vert[1])
-            dic["z"].append(vert[2])
-    
-    xmin = min(dic["x"])
-    xmax = max(dic["x"])
-    ymin = min(dic["y"])
-    ymax = max(dic["y"])
-    zmin = min(dic["z"])
+    # Calculating bounds for the fringe
+    x = [v.co.x for v in bm.verts]
+    y = [v.co.y for v in bm.verts]
+    z = [v.co.z for v in bm.verts]
 
+    xmin, xmax = min(x), max(x)
+    ymin, ymax = min(y), max(y)
+    zmin = min(z)
+
+    # Setting the fringe
     thresh = 0.1
-    for vert in vertices:
-        if abs(vert.co[0] - xmin) < thresh:
-            vert.select_set(True)
-            vert.co[2] = zmin - fringe
-        elif abs(vert.co[1] - ymin) < thresh:
-            vert.select_set(True)
-            vert.co[2] = zmin - fringe
-        elif abs(vert.co[0] - xmax) < thresh:
-            vert.select_set(True)
-            vert.co[2] = zmin - fringe
-        elif abs(vert.co[1] - ymax) < thresh:
-            vert.select_set(True)
-            vert.co[2] = zmin - fringe
+    for vert in bm.verts:
+        if (abs(vert.co.x - xmin) < thresh or
+            abs(vert.co.y - ymin) < thresh or
+            abs(vert.co.x - xmax) < thresh or
+            abs(vert.co.y - ymax) < thresh):
+            vert.co.z = zmin - fringe
     
-    bmesh.update_edit_mesh(mesh, loop_triangles=True)
+    def faces_side(normal: Vector) -> bool:
+        """Determines if the face with the given normal is facing the side"""
+        up_dot = normal.dot(Vector((0, 0, 1)))
+        down_dot = normal.dot(Vector((0, 0, -1)))
+        return (up_dot <= SLOPE_LIMIT and down_dot <= SLOPE_LIMIT)
 
-    def normal_in_direction(normal: Vector, direction: Vector, limit: float = 0.5) -> bool:
-        return direction.dot(normal) > limit
+    # Recompile mesh after modifying fringe
+    bm.calc_loop_triangles()
+
+    # Identifying and selecting side faces
+    for face in bm.faces:
+        for loop in face.loops:
+            # Just checking the first loop for speed
+            if faces_side(loop.calc_normal()):
+                face.material_index = 1
+            else:
+                face.material_index = 0
+            break
+
+    # Reinstantiating mesh and freeing local copy
+    bm.to_mesh(mesh)
+    bm.free()
+
     
-    def going_up(normal: Vector, limit: float = 0.5) -> bool:
-        return normal_in_direction(normal, Vector((0, 0, 1)), limit)
-
-    def going_down(normal: Vector, limit: float = 0.5) -> bool:
-        return normal_in_direction(normal, Vector((0, 0, -1)), limit)
-
-    def going_side(normal: Vector, limit: float = 0.2) -> bool:
-        return (not going_up(normal, limit)) and (not going_down(normal, limit))
-    
-    # Switching to object mode
-    bpy.ops.object.mode_set(mode="OBJECT", toggle=False)
-
-    for face in terrain.data.polygons:
-        face.select = going_side(face.normal)
-    
-    # Switching to edit mode
-    bpy.ops.object.mode_set(mode="EDIT", toggle=False)
-
-    assign_material(objectName, "terrain_sides_material")
-    bpy.ops.object.material_slot_assign()
-
-    bpy.ops.object.mode_set(mode="OBJECT", toggle=False)
-
-
 def adjust_3d_view(object: bpy.types.Object) -> None:
     dst = round(max(object.dimensions)) * VIEW_INCREASE_FACTOR
     
