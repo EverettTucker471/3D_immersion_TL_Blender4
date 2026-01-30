@@ -2,6 +2,7 @@
 @description: Implements a minimial version of Modeling 3D optimized
 for use with Blender 5.0.1
 
+Respects:
 camelCase for variables
 snake_case for functions
 
