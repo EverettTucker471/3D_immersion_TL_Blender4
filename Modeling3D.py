@@ -36,6 +36,10 @@ SUN_LOCATION: Final[Tuple[int, int, int]] = (0, 0, 1000)
 SUN_ORIENTATION: Final[Tuple[float, float, float]] = (0.9, 0.9, 0.9)
 SUN_SHADOW: Final[int] = 1000
 
+# TREE PARAMETERS
+MIN_TREE_SCALE = 0.95  # Relative scale
+MAX_TREE_SCALE = 1.05  # Relative scale
+TREE_DENSITY = 50  # Count per m^2
 
 class Prefs:
     """
@@ -126,8 +130,11 @@ class Adapt:
     def trees(self, patchFiles: str, watchFolder: str) -> None:
         # Grabbing the geometry node modifier
         terrain = bpy.data.objects.get(self.plane)
-        geoMod = terrain.modifiers.get("tree_mod")
-        
+
+        # If modifier wasn't initialized because of no terrain, initialize it now
+        if "tree_mod" not in terrain.modifiers:
+            geoMod = terrain.modifiers.get("tree_mod")
+    
         for patchFile in patchFiles:
             path = os.path.join(watchFolder, patchFile)
             patchType = os.path.splitext(patchFile)[0].split("_")[1]
@@ -263,7 +270,13 @@ class TL_OT_Assets(bpy.types.Operator):
         for each in prefs.trees:
             tree_name = load_objects_from_file(prefs.trees[each]["model"], scale=prefs.scale)
             treeObjNames.append(tree_name[0])
-        create_geo_nodes(bpy.data.objects.get(TERRAIN_OBJECT), treeObjNames)
+
+        if TERRAIN_OBJECT in [obj.name for obj in bpy.data.objects]:
+            create_geo_nodes(bpy.data.objects.get(TERRAIN_OBJECT), treeObjNames)
+        else:
+            # Delay creation of geo node modifier
+            print("Warning: No Terrain")
+            print("Geometry nodes will be initialized later")
 
         return {"FINISHED"}
 
@@ -474,11 +487,6 @@ def load_objects_from_file(filepath: str, scale: float = 1.0) -> List[str]:
 
 
 def create_geo_nodes(terrain: bpy.types.Object, treeObjNames: List[str]) -> bpy.types.Modifier:
-    # Parameters for the geometry nodes
-    treeDensities = [0.5] * len(treeObjNames)
-    # Tree scale ranges in x, y, z
-    treeScaleRanges = [([0.8, 0.8, 0.8], [1.2, 1.2, 1.2])] * len(treeObjNames)
-
     # Cleaning up any existing modifiers - ablation
     for mod in terrain.modifiers[:]:
         if mod.type == "NODES" and "tree_mod" in mod.name:
@@ -494,12 +502,18 @@ def create_geo_nodes(terrain: bpy.types.Object, treeObjNames: List[str]) -> bpy.
     interface.new_socket(
         name="terrain",
         in_out="INPUT",
-        socket_type="NodeSocketGeometry"
+        socket_type="NodeSocketGeometry",
+    )
+
+    # Defining output socket
+    interface.new_socket(
+        name="Geometry",
+        in_out="OUTPUT",
+        socket_type="NodeSocketGeometry",
     )
 
     nodes = nodeGroup.nodes
     links = nodeGroup.links
-    nodes.clear()  # Perhaps unnecessary - ablation
 
     # Creating input and output node groups
     groupInput = nodes.new("NodeGroupInput")
@@ -512,6 +526,23 @@ def create_geo_nodes(terrain: bpy.types.Object, treeObjNames: List[str]) -> bpy.
             in_out="INPUT",
             socket_type="NodeSocketImage",
         )
+
+    # Randomly distributes points according to density mesh
+    distribute = nodes.new("GeometryNodeDistributePointsOnFaces")
+    distribute.inputs[4].default_value = TREE_DENSITY
+    distribute.distribute_method = "RANDOM"
+
+    # Randomizes the scale of the trees for realism
+    randomScale = nodes.new("FunctionNodeRandomValue")
+    randomScale.data_type = "FLOAT_VECTOR"
+    randomScale.inputs[0].default_value = [MIN_TREE_SCALE] * 3
+    randomScale.inputs[1].default_value = [MAX_TREE_SCALE] * 3
+
+    # Randomizes the rotation of the trees for realism
+    randomRot = nodes.new("FunctionNodeRandomValue")
+    randomRot.data_type = "FLOAT_VECTOR"
+    randomRot.inputs[0].default_value = (0, 0, 0)  # Min rotation
+    randomRot.inputs[1].default_value = (0, 0, 2 * math.pi)  # Max rotation
     
     # Build a parallel distribution branch for each tree type
     instanceOutputs = []
@@ -522,40 +553,15 @@ def create_geo_nodes(terrain: bpy.types.Object, treeObjNames: List[str]) -> bpy.
         # Linking the texture input to the pipeline
         links.new(groupInput.outputs[f"mask_{i}"], sampleTexture.inputs[0])
 
-        # Grabs the first channel WLOG
-        colorChannels = nodes.new("FunctionNodeSeparateColor")
-        links.new(sampleTexture.outputs["Color"], colorChannels.inputs[0])
-
-        # Incorporates density into the mask
-        multiply = nodes.new("ShaderNodeMath")
-        multiply.operation = "MULTIPLY"
-        multiply.inputs[1].default_value = treeDensities[i]
-        links.new(colorChannels.outputs["Red"], multiply.inputs[0])
-
-        # Randomly distributes points according to density mesh
-        distribute = nodes.new("GeometryNodeDistributePointsOnFaces")
-        distribute.inputs[2].default_value = 1.0  # Ask for clarification here
+        # Linking the distribute node
         links.new(groupInput.outputs["terrain"], distribute.inputs[0])
-        links.new(multiply.outputs[0], distribute.inputs[5])
-
-        # Randomizes the scale of the trees for realism
-        randomScale = nodes.new("FunctionNodeRandomValue")
-        randomScale.data_type = "FLOAT"
-        randomScale.inputs[2].default_value = 1.0  # Just trying to compile, test
-
-        # Randomizes the rotation of the trees for realism
-        randomRot = nodes.new("FunctionNodeRandomValue")
-        randomRot.data_type = "FLOAT_VECTOR"
-        # 0-2pi gives total random rotation along the z-axis
-        randomRot.inputs[1].default_value = (0, 0, 0)
-        # randomRot.inputs[2].default_value = (0, 0, 2 * math.pi)
+        links.new(sampleTexture.outputs["Color"], distribute.inputs[3])
 
         # Create instances of the tree objects
         instance = nodes.new("GeometryNodeInstanceOnPoints")
         links.new(distribute.outputs[0], instance.inputs[0])
 
         objectInfo = nodes.new("GeometryNodeObjectInfo")
-        print(treeObjNames[i])
         objectInfo.inputs[0].default_value = bpy.data.objects.get(treeObjNames[i])
         objectInfo.transform_space = "RELATIVE"
         links.new(objectInfo.outputs["Geometry"], instance.inputs[2])
@@ -568,13 +574,14 @@ def create_geo_nodes(terrain: bpy.types.Object, treeObjNames: List[str]) -> bpy.
     
     # Combining the outputs for each tree
     joinGeoNode = nodes.new("GeometryNodeJoinGeometry")
-    for i, instance in enumerate(instanceOutputs):
+    links.new(groupInput.outputs["terrain"], joinGeoNode.inputs[0])
+
+    for instance in instanceOutputs:
         # Currently breaking here because there aren't enough input spaces in the joinGeoNode
-        links.new(instance.outputs[0], joinGeoNode.inputs[i])
+        links.new(instance.outputs[0], joinGeoNode.inputs[0])
     
     # Linking join node to output and setting terrain
     links.new(joinGeoNode.outputs[0], groupOutput.inputs[0])
-    geoMod["Input_0"] = terrain.data
 
     return geoMod
 
