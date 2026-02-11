@@ -13,7 +13,7 @@
 			"texture": "patch_class4.png"
 		},
 		"class1": {
-			"model": "assets/simple_tree.blend",
+			"model": "assets/poly_tree.blend",
 			"texture": "patch_class1.png"
 		},
 		"class2": {
