@@ -37,8 +37,8 @@ SUN_ORIENTATION: Final[Tuple[float, float, float]] = (0.9, 0.9, 0.9)
 SUN_SHADOW: Final[int] = 1000
 
 # TREE PARAMETERS
-MIN_TREE_SCALE = 0.02  # Relative scale
-MAX_TREE_SCALE = 0.04  # Relative scale
+MIN_TREE_SCALE = 0.95  # Relative scale variation
+MAX_TREE_SCALE = 1.05  # Relative scale variation
 TREE_DENSITY = 400  # Count per m^2
 
 class Prefs:
@@ -275,8 +275,8 @@ class TL_OT_Assets(bpy.types.Operator):
         remove_object("Cube")
 
         # Creating tree objects and initializing geometry nodes
-        for each in prefs.trees:
-            load_objects_from_file(prefs.trees[each]["model"], scale=prefs.scale)
+        for cls in prefs.trees:
+            load_objects_from_file(prefs.trees[cls]["model"], baseSize=prefs.scale)
 
         if TERRAIN_OBJECT in [obj.name for obj in bpy.data.objects]:
             create_geo_nodes(bpy.data.objects.get(TERRAIN_OBJECT))
@@ -478,7 +478,7 @@ def create_world(name: str, texturePath: str) -> bpy.types.Object:
     return world
 
 
-def load_objects_from_file(filepath: str, scale: float = 1.0) -> List[str]:
+def load_objects_from_file(filepath: str, baseSize: float = 1.0) -> List[str]:
     with bpy.data.libraries.load(filepath, link=False) as (src, dst):
         dst.objects = [name for name in src.objects]
     
@@ -486,19 +486,24 @@ def load_objects_from_file(filepath: str, scale: float = 1.0) -> List[str]:
     names = []
     for obj in dst.objects:
         bpy.context.collection.objects.link(obj)
-        names.append(obj.name)
-        obj.scale *= scale
+
+        # 'obj' is stale after linking, so regenerate
+        obj = bpy.data.objects[obj.name]
+        height = obj.dimensions.z
+        if height > 0:
+            obj.scale = tuple([baseSize / height] * 3)
         obj.rotation_euler = (0, 0, 0)
         obj.hide_set(True)
+        names.append(obj.name)
+
     return names
 
 
 def create_geo_nodes(terrain: bpy.types.Object) -> bpy.types.Modifier:
-    # Checking for existing node group
+    # Create node group if it doesn't exist
     nodeGroup = bpy.data.node_groups.get("tree_geo_group")
-
     if not nodeGroup:
-        nodeGroup = create_node_group(terrain)
+        nodeGroup = create_node_group()
 
     geoMod = terrain.modifiers.new(name="tree_mod", type="NODES")
     geoMod.node_group = nodeGroup
@@ -506,10 +511,10 @@ def create_geo_nodes(terrain: bpy.types.Object) -> bpy.types.Modifier:
     return geoMod
     
 
-def create_node_group(terrain: bpy.types.Object) -> bpy.types.NodeGroup:
+def create_node_group() -> bpy.types.NodeGroup:
     # The trees should already be in the scene, so grab them
     treeObjNames = [obj.name for obj in bpy.data.objects if obj.name.startswith("Tree")]
-    # treeObjNames = treeObjNames[:1]  # Temporary to get just the first tree
+    treeObjNames = treeObjNames[:1]  # Temporary to get just the first tree
 
     nodeGroup = bpy.data.node_groups.new("tree_geo_group", "GeometryNodeTree")
 
@@ -600,7 +605,7 @@ def create_node_group(terrain: bpy.types.Object) -> bpy.types.NodeGroup:
         # Adding tree objects into pipeline
         objectInfo = nodes.new("GeometryNodeObjectInfo")
         objectInfo.inputs[0].default_value = bpy.data.objects.get(treeObjNames[i])
-        objectInfo.transform_space = "ORIGINAL"
+        objectInfo.transform_space = "RELATIVE"
         links.new(objectInfo.outputs["Geometry"], instance.inputs[2])
 
         # Linking random scale and rotation to tree objects
