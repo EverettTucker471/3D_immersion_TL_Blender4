@@ -37,9 +37,11 @@ SUN_ORIENTATION: Final[Tuple[float, float, float]] = (0.9, 0.9, 0.9)
 SUN_SHADOW: Final[int] = 1000
 
 # TREE PARAMETERS
-MIN_TREE_SCALE = 0.95  # Relative scale variation
-MAX_TREE_SCALE = 1.05  # Relative scale variation
-TREE_DENSITY = 400  # Count per m^2
+MIN_TREE_SCALE: Final[float] = 0.95  # Relative scale variation
+MAX_TREE_SCALE: Final[float] = 1.05  # Relative scale variation
+TREE_DENSITY: Final[int] = 400  # Count per m^2
+TREE_COLLECTION_NAME: Final[str] = "tree_collection"
+
 
 class Prefs:
     """
@@ -274,9 +276,18 @@ class TL_OT_Assets(bpy.types.Operator):
 
         remove_object("Cube")
 
-        # Creating tree objects and initializing geometry nodes
+        # Creating a collection for the trees
+        if TREE_COLLECTION_NAME not in bpy.data.collections:
+            treeCollection = bpy.data.collections.new(TREE_COLLECTION_NAME)
+            bpy.context.scene.collection.children.link(treeCollection)
+        else:
+            treeCollection = bpy.data.collections[TREE_COLLECTION_NAME]
+
+        # Creating tree objects and linking them to the collection
         for cls in prefs.trees:
-            load_objects_from_file(prefs.trees[cls]["model"], baseSize=prefs.scale)
+            treeName = load_objects_from_file(prefs.trees[cls]["model"], baseSize=prefs.scale)[0]
+            treeObject = bpy.data.objects.get(treeName)
+            treeCollection.objects.link(treeObject)
 
         if TERRAIN_OBJECT in [obj.name for obj in bpy.data.objects]:
             create_geo_nodes(bpy.data.objects.get(TERRAIN_OBJECT))
@@ -514,7 +525,9 @@ def create_geo_nodes(terrain: bpy.types.Object) -> bpy.types.Modifier:
 def create_node_group() -> bpy.types.NodeGroup:
     # The trees should already be in the scene, so grab them
     treeObjNames = [obj.name for obj in bpy.data.objects if obj.name.startswith("Tree")]
-    treeObjNames = treeObjNames[:1]  # Temporary to get just the first tree
+    if not treeObjNames:
+        print("No trees to create node group!")
+        return None
 
     nodeGroup = bpy.data.node_groups.new("tree_geo_group", "GeometryNodeTree")
 
@@ -553,11 +566,6 @@ def create_node_group() -> bpy.types.NodeGroup:
     uvMapNode.inputs[0].default_value = "demUVmap"
     uvMapNode.data_type = "FLOAT_VECTOR"
 
-    # Randomly distributes points according to density mesh
-    distribute = nodes.new("GeometryNodeDistributePointsOnFaces")
-    distribute.distribute_method = "RANDOM"
-    links.new(groupInput.outputs["terrain"], distribute.inputs[0])
-
     # Randomizes the scale of the trees for realism
     randomScale = nodes.new("FunctionNodeRandomValue")
     randomScale.data_type = "FLOAT_VECTOR"
@@ -570,54 +578,69 @@ def create_node_group() -> bpy.types.NodeGroup:
     randomRot.inputs[0].default_value = (0, 0, 0)  # Min rotation
     randomRot.inputs[1].default_value = (0, 0, 2 * math.pi)  # Max rotation
 
-    # Math Nodes for inverting and scaling the mask
-    inverseNode = nodes.new("ShaderNodeMath")
-    inverseNode.operation = "SUBTRACT"
-    inverseNode.inputs[0].default_value = 1.0
-    multiplyNode = nodes.new("ShaderNodeMath")
-    multiplyNode.operation = "MULTIPLY"
-    multiplyNode.inputs[1].default_value = TREE_DENSITY
-    links.new(inverseNode.outputs[0], multiplyNode.inputs[0])
-    links.new(multiplyNode.outputs[0], distribute.inputs["Density"])
+    # Create Object Collection Node for all trees
+    collectionInfoNode = nodes.new("GeometryNodeCollectionInfo")
+    collectionInfoNode.inputs[0].default_value = bpy.data.collections.get(TREE_COLLECTION_NAME)
+    collectionInfoNode.inputs["Separate Children"].default_value = True
+    collectionInfoNode.inputs["Reset Children"].default_value = True
+    collectionInfoNode.transform_space = "RELATIVE"
 
-    # Combining the outputs for each tree
+    # Creating Density and Identity Masks for Trees
+    currentDensityOutput = None
+    currentIdentityOutput = None
+    for i in range(len(treeObjNames)):
+        treeTexture = nodes.new("GeometryNodeImageTexture")
+        links.new(groupInput.outputs[f"mask_{i}"], treeTexture.inputs[0])
+        links.new(uvMapNode.outputs["Attribute"], treeTexture.inputs[1])
+
+        tempDensityOutput = nodes.new("ShaderNodeMath")
+        tempDensityOutput.operation = "ADD"
+        links.new(treeTexture.outputs["Color"], tempDensityOutput.inputs[0])
+        tempIdentityOutput = nodes.new("ShaderNodeMath")
+        tempIdentityOutput.operation = "MULTIPLY"
+        links.new(treeTexture.outputs["Color"], tempIdentityOutput.inputs[0])
+        tempIdentityOutput.inputs[1].default_value = i
+
+        if i == 0:
+            tempDensityOutput.inputs[1].default_value = 0.0
+        else:
+            sumNode = nodes.new("ShaderNodeMath")
+            sumNode.operation = "ADD"
+            links.new(currentIdentityOutput.outputs["Value"], sumNode.inputs[0])
+            links.new(tempIdentityOutput.outputs["Value"], sumNode.inputs[1])  # Identity Mask
+            tempIdentityOutput = sumNode
+            links.new(currentDensityOutput.outputs["Value"], tempDensityOutput.inputs[1])  # Density Mask
+        
+        currentIdentityOutput = tempIdentityOutput
+        currentDensityOutput = tempDensityOutput
+    
+    # Adding a density scaler for the density mask
+    densityScaler = nodes.new("ShaderNodeMath")
+    densityScaler.operation = "MULTIPLY"
+    densityScaler.inputs[0].default_value = TREE_DENSITY
+    links.new(currentDensityOutput.outputs["Value"], densityScaler.inputs[1])
+
+    # Adding in the distribute node
+    distribute = nodes.new("GeometryNodeDistributePointsOnFaces")
+    distribute.distribute_method = "RANDOM"
+    links.new(densityScaler.outputs[0], distribute.inputs["Density"])
+    links.new(groupInput.outputs["terrain"], distribute.inputs["Mesh"])  # Alternatively try inputs[0]
+
+    # Adding in the instancer node
+    instancer = nodes.new("GeometryNodeInstanceOnPoints")
+    instancer.inputs["Pick Instance"].default_value = True
+    links.new(distribute.outputs[0], instancer.inputs["Points"])
+    links.new(currentIdentityOutput.outputs[0], instancer.inputs["Selection"])  # Check this one
+    links.new(collectionInfoNode.outputs["Geometry"], instancer.inputs["Instance"])
+    links.new(randomRot.outputs[0], instancer.inputs["Rotation"])
+    links.new(randomScale.outputs[0], instancer.inputs["Scale"])
+
+    # Adding in the join geometry node
     joinGeoNode = nodes.new("GeometryNodeJoinGeometry")
     links.new(groupInput.outputs["terrain"], joinGeoNode.inputs[0])
-
-    # Build a parallel distribution branch for each tree type
-    for i in range(len(treeObjNames)):
-        # Setting up the texture mask
-        sampleTexture = nodes.new("GeometryNodeImageTexture")
-
-        # Adding a uv map to wrap the terrain in a texture
-        links.new(uvMapNode.outputs[0], sampleTexture.inputs[1])
-        
-        # Linking the texture input to the pipeline
-        links.new(groupInput.outputs[f"mask_{i}"], sampleTexture.inputs[0])
-
-        # Adding in a subtraction
-        links.new(sampleTexture.outputs["Color"], inverseNode.inputs[1]) # Inverting the mask
-
-        # Create instances of the tree objects
-        instance = nodes.new("GeometryNodeInstanceOnPoints")
-        links.new(distribute.outputs[0], instance.inputs[0])
-
-        # Adding tree objects into pipeline
-        objectInfo = nodes.new("GeometryNodeObjectInfo")
-        objectInfo.inputs[0].default_value = bpy.data.objects.get(treeObjNames[i])
-        objectInfo.transform_space = "RELATIVE"
-        links.new(objectInfo.outputs["Geometry"], instance.inputs[2])
-
-        # Linking random scale and rotation to tree objects
-        links.new(randomScale.outputs[0], instance.inputs[6])
-        links.new(randomRot.outputs[0], instance.inputs[5])
-
-        # Linking instancer to output
-        links.new(instance.outputs[0], joinGeoNode.inputs[0])
+    links.new(instancer.outputs["Instances"], joinGeoNode.inputs[1])
 
     # Linking join node to output and setting terrain
     links.new(joinGeoNode.outputs[0], groupOutput.inputs[0])
 
     return nodeGroup
-
-
