@@ -39,7 +39,7 @@ SUN_SHADOW: Final[int] = 1000
 # TREE PARAMETERS
 MIN_TREE_SCALE: Final[float] = 0.95  # Relative scale variation
 MAX_TREE_SCALE: Final[float] = 1.05  # Relative scale variation
-TREE_DENSITY: Final[int] = 400  # Count per m^2
+TREE_DENSITY: Final[int] = 15  # Count per m^2
 TREE_COLLECTION_NAME: Final[str] = "tree_collection"
 
 
@@ -503,6 +503,7 @@ def load_objects_from_file(filepath: str, baseSize: float = 1.0) -> List[str]:
         height = obj.dimensions.z
         if height > 0:
             obj.scale = tuple([baseSize / height] * 3)
+            print(f"Object scale set to {obj.scale}")
         obj.rotation_euler = (0, 0, 0)
         obj.hide_set(True)
         names.append(obj.name)
@@ -582,7 +583,7 @@ def create_node_group() -> bpy.types.NodeGroup:
     collectionInfoNode = nodes.new("GeometryNodeCollectionInfo")
     collectionInfoNode.inputs[0].default_value = bpy.data.collections.get(TREE_COLLECTION_NAME)
     collectionInfoNode.inputs["Separate Children"].default_value = True
-    collectionInfoNode.inputs["Reset Children"].default_value = True
+    collectionInfoNode.inputs["Reset Children"].default_value = False
     collectionInfoNode.transform_space = "RELATIVE"
 
     # Creating Density and Identity Masks for Trees
@@ -624,21 +625,21 @@ def create_node_group() -> bpy.types.NodeGroup:
     distribute = nodes.new("GeometryNodeDistributePointsOnFaces")
     distribute.distribute_method = "RANDOM"
     links.new(densityScaler.outputs[0], distribute.inputs["Density"])
-    links.new(groupInput.outputs["terrain"], distribute.inputs["Mesh"])  # Alternatively try inputs[0]
+    links.new(groupInput.outputs["terrain"], distribute.inputs["Mesh"])
 
     # Adding in the instancer node
     instancer = nodes.new("GeometryNodeInstanceOnPoints")
     instancer.inputs["Pick Instance"].default_value = True
-    links.new(distribute.outputs[0], instancer.inputs["Points"])
-    links.new(currentIdentityOutput.outputs[0], instancer.inputs["Selection"])  # Check this one
-    links.new(collectionInfoNode.outputs["Geometry"], instancer.inputs["Instance"])
+    links.new(distribute.outputs["Points"], instancer.inputs["Points"])
+    links.new(currentIdentityOutput.outputs[0], instancer.inputs["Instance Index"])
+    links.new(collectionInfoNode.outputs["Instances"], instancer.inputs["Instance"])
     links.new(randomRot.outputs[0], instancer.inputs["Rotation"])
     links.new(randomScale.outputs[0], instancer.inputs["Scale"])
 
     # Adding in the join geometry node
     joinGeoNode = nodes.new("GeometryNodeJoinGeometry")
-    links.new(groupInput.outputs["terrain"], joinGeoNode.inputs[0])
-    links.new(instancer.outputs["Instances"], joinGeoNode.inputs[1])
+    links.new(groupInput.outputs["terrain"], joinGeoNode.inputs["Geometry"])
+    links.new(instancer.outputs["Instances"], joinGeoNode.inputs["Geometry"])
 
     # Linking join node to output and setting terrain
     links.new(joinGeoNode.outputs[0], groupOutput.inputs[0])
