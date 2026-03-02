@@ -147,7 +147,8 @@ class Adapt:
             image.pack()
 
             # Inputting the image to the geometry node
-            geoMod[f"Socket_{patchType + 1}"] = image
+            # Socket_1 is terrain, like base_cat = [1]
+            geoMod[f"Socket_{patchType}"] = image
             os.remove(path)
 
         
@@ -581,7 +582,7 @@ def create_node_group() -> bpy.types.NodeGroup:
 
     # Create Object Collection Node for all trees
     collectionInfoNode = nodes.new("GeometryNodeCollectionInfo")
-    collectionInfoNode.inputs[0].default_value = bpy.data.collections.get(TREE_COLLECTION_NAME)
+    collectionInfoNode.inputs["Collection"].default_value = bpy.data.collections.get(TREE_COLLECTION_NAME)
     collectionInfoNode.inputs["Separate Children"].default_value = True
     collectionInfoNode.inputs["Reset Children"].default_value = False
     collectionInfoNode.transform_space = "RELATIVE"
@@ -591,15 +592,24 @@ def create_node_group() -> bpy.types.NodeGroup:
     currentIdentityOutput = None
     for i in range(len(treeObjNames)):
         treeTexture = nodes.new("GeometryNodeImageTexture")
-        links.new(groupInput.outputs[f"mask_{i}"], treeTexture.inputs[0])
-        links.new(uvMapNode.outputs["Attribute"], treeTexture.inputs[1])
+        treeTexture.interpolation = "Closest"
+        treeTexture.extension = "CLIP"
+        links.new(groupInput.outputs[f"mask_{i}"], treeTexture.inputs["Image"])
+        links.new(uvMapNode.outputs["Attribute"], treeTexture.inputs["Vector"])
+
+        clampMask = nodes.new("ShaderNodeMath")
+        clampMask.operation = "GREATER_THAN"
+        links.new(treeTexture.outputs["Color"], clampMask.inputs[0])
+        clampMask.inputs[1].default_value = 0.1
 
         tempDensityOutput = nodes.new("ShaderNodeMath")
         tempDensityOutput.operation = "ADD"
-        links.new(treeTexture.outputs["Color"], tempDensityOutput.inputs[0])
+        # links.new(treeTexture.outputs["Color"], tempDensityOutput.inputs[0])
+        links.new(clampMask.outputs["Value"], tempDensityOutput.inputs[0])
         tempIdentityOutput = nodes.new("ShaderNodeMath")
         tempIdentityOutput.operation = "MULTIPLY"
-        links.new(treeTexture.outputs["Color"], tempIdentityOutput.inputs[0])
+        # links.new(treeTexture.outputs["Color"], tempIdentityOutput.inputs[0])
+        links.new(clampMask.outputs["Value"], tempIdentityOutput.inputs[0])
         tempIdentityOutput.inputs[1].default_value = i
 
         if i == 0:
@@ -624,17 +634,17 @@ def create_node_group() -> bpy.types.NodeGroup:
     # Adding in the distribute node
     distribute = nodes.new("GeometryNodeDistributePointsOnFaces")
     distribute.distribute_method = "RANDOM"
-    links.new(densityScaler.outputs[0], distribute.inputs["Density"])
+    links.new(densityScaler.outputs["Value"], distribute.inputs["Density"])
     links.new(groupInput.outputs["terrain"], distribute.inputs["Mesh"])
 
     # Adding in the instancer node
     instancer = nodes.new("GeometryNodeInstanceOnPoints")
     instancer.inputs["Pick Instance"].default_value = True
     links.new(distribute.outputs["Points"], instancer.inputs["Points"])
-    links.new(currentIdentityOutput.outputs[0], instancer.inputs["Instance Index"])
+    links.new(currentIdentityOutput.outputs["Value"], instancer.inputs["Instance Index"])
     links.new(collectionInfoNode.outputs["Instances"], instancer.inputs["Instance"])
-    links.new(randomRot.outputs[0], instancer.inputs["Rotation"])
-    links.new(randomScale.outputs[0], instancer.inputs["Scale"])
+    links.new(randomRot.outputs["Value"], instancer.inputs["Rotation"])
+    links.new(randomScale.outputs["Value"], instancer.inputs["Scale"])
 
     # Adding in the join geometry node
     joinGeoNode = nodes.new("GeometryNodeJoinGeometry")

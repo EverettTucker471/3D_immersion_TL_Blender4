@@ -10,20 +10,9 @@ Usage:
 import sys
 import bpy
 import argparse
-import importlib
-import subprocess
-
-
-def restart_blender():
-    """Relaunch Blender with the same command-line arguments."""
-    blender_executable = bpy.app.binary_path
-    original_args = [a for a in sys.argv if "reinstall_addon.py" not in a]
-    subprocess.Popen([blender_executable] + original_args)
-    bpy.ops.wm.quit_blender()
 
 
 def main():
-
     # Removing the breaker argument from between the blender and python calls
     argv = sys.argv
     if "--" in argv:
@@ -38,18 +27,20 @@ def main():
     parser.add_argument('--addon_name', help="The name of the add-on, should be the same as the repo", required=True)
     args = parser.parse_args(argv)
 
-    # Install the addon from the zip path
-    bpy.ops.preferences.addon_install(filepath=args.addon_zip_path, overwrite=True, enable_on_install=True)
+    # Removing the stale add-on
+    if args.addon_name in bpy.context.preferences.addons:
+        bpy.ops.preferences.addon_disable(module=args.addon_name)
+        bpy.ops.preferences.addon_remove(module=args.addon_name)
+
+    # Install the fresh addon from the zip path
+    bpy.ops.preferences.addon_install(filepath=args.addon_zip_path, enable_on_install=True)
     bpy.ops.preferences.addon_disable(module=args.addon_name)
     bpy.ops.preferences.addon_enable(module=args.addon_name)
 
     # Configure the addon with the tl_coupling path
-
-    print(bpy.context.preferences.addons[args.addon_name].preferences)
     prefs = bpy.context.preferences.addons[args.addon_name].preferences
     prefs.folder = args.tl_coupling_path
     bpy.ops.wm.save_userpref()
-
     print("3D Immersion TL Successfully Reloaded")
 
 

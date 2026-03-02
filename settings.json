@@ -17,11 +17,11 @@
 			"texture": "patch_class1.png"
 		},
 		"class2": {
-			"model": "assets/river_birch_tree.blend",
+			"model": "assets/poly_tree.blend",
 			"texture": "patch_class2.png"
 		},
 		"class3": {
-			"model": "assets/river_birch_tree.blend",
+			"model": "assets/poly_tree.blend",
 			"texture": "patch_class3.png"
 		}
 	},
