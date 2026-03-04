@@ -14,7 +14,7 @@ while pgrep -x "blender" > /dev/null; do
 done
 
 # Path to zip the file to, should be outside
-mkdir $TL_COUPLING/zip
+mkdir -p $TL_COUPLING/zip
 rm $TL_COUPLING/zip/*.zip
 ZIP_PATH="$TL_COUPLING/zip/3D_immersion_TL-master.zip"
 

@@ -39,7 +39,7 @@ SUN_SHADOW: Final[int] = 1000
 # TREE PARAMETERS
 MIN_TREE_SCALE: Final[float] = 0.95  # Relative scale variation
 MAX_TREE_SCALE: Final[float] = 1.05  # Relative scale variation
-TREE_DENSITY: Final[int] = 15  # Count per m^2
+TREE_DENSITY: Final[int] = 50  # Count per m^2
 TREE_COLLECTION_NAME: Final[str] = "tree_collection"
 
 
@@ -163,7 +163,10 @@ class ModalTimerOperator(bpy.types.Operator):
     _timer_count = 0
 
     def modal(self, context: bpy.types.Context, event: bpy.types.Event) -> Dict:
-        if event.type == "TIMER":
+        if event.type == "ESC":
+            print("Shutting down operator")
+            self.cancel(context=context)
+        elif event.type == "TIMER":
             if self._timer_count != self._timer.time_duration:
                 self._timer_count = self._timer.time_duration
                 fileList = os.listdir(self.prefs.watchFolder)
@@ -274,8 +277,14 @@ class TL_OT_Assets(bpy.types.Operator):
         bpy.context.space_data.overlay.show_outline_selected = False
         bpy.context.space_data.overlay.show_extras = False
         bpy.context.space_data.overlay.show_object_origins = False
+        # Setting viewport distance
+        bpy.context.space_data.clip_start = 0.1
+        bpy.context.space_data.clip_end = 10
 
+        # Removing default objects in a new Blender scene
         remove_object("Cube")
+        remove_object("Camera")
+        remove_object("Light")
 
         # Creating a collection for the trees
         if TREE_COLLECTION_NAME not in bpy.data.collections:
@@ -328,7 +337,7 @@ def remove_object(objectName: str) -> bpy.types.Object:
     if obj:
         mesh = obj.data
         bpy.data.objects.remove(obj)  # Removing object
-        if obj and mesh.users == 0:
+        if obj and type(mesh) == bpy.types.Mesh and mesh.users == 0:
             bpy.data.meshes.remove(mesh)  # Removing mesh if orphaned
         return obj
     return None

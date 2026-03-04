@@ -27,21 +27,14 @@ def main():
     parser.add_argument('--addon_name', help="The name of the add-on, should be the same as the repo", required=True)
     args = parser.parse_args(argv)
 
-    # Removing the stale add-on
-    if args.addon_name in bpy.context.preferences.addons:
-        bpy.ops.preferences.addon_disable(module=args.addon_name)
-        bpy.ops.preferences.addon_remove(module=args.addon_name)
-
     # Install the fresh addon from the zip path
     bpy.ops.preferences.addon_install(filepath=args.addon_zip_path, enable_on_install=True)
-    bpy.ops.preferences.addon_disable(module=args.addon_name)
-    bpy.ops.preferences.addon_enable(module=args.addon_name)
 
     # Configure the addon with the tl_coupling path
     prefs = bpy.context.preferences.addons[args.addon_name].preferences
     prefs.folder = args.tl_coupling_path
     bpy.ops.wm.save_userpref()
-    print("3D Immersion TL Successfully Reloaded")
+    print(f"{args.addon_name} Successfully Reloaded")
 
 
 if __name__ == '__main__':
