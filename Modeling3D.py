@@ -39,7 +39,7 @@ SUN_SHADOW: Final[int] = 1000
 # TREE PARAMETERS
 MIN_TREE_SCALE: Final[float] = 0.95  # Relative scale variation
 MAX_TREE_SCALE: Final[float] = 1.05  # Relative scale variation
-TREE_DENSITY: Final[int] = 50  # Count per m^2
+TREE_DENSITY: Final[int] = 500  # Count per m^2
 TREE_COLLECTION_NAME: Final[str] = "tree_collection"
 
 
@@ -277,9 +277,6 @@ class TL_OT_Assets(bpy.types.Operator):
         bpy.context.space_data.overlay.show_outline_selected = False
         bpy.context.space_data.overlay.show_extras = False
         bpy.context.space_data.overlay.show_object_origins = False
-        # Setting viewport distance
-        bpy.context.space_data.clip_start = 0.1
-        bpy.context.space_data.clip_end = 10
 
         # Removing default objects in a new Blender scene
         remove_object("Cube")
@@ -290,14 +287,10 @@ class TL_OT_Assets(bpy.types.Operator):
         if TREE_COLLECTION_NAME not in bpy.data.collections:
             treeCollection = bpy.data.collections.new(TREE_COLLECTION_NAME)
             bpy.context.scene.collection.children.link(treeCollection)
-        else:
-            treeCollection = bpy.data.collections[TREE_COLLECTION_NAME]
 
-        # Creating tree objects and linking them to the collection
-        for cls in prefs.trees:
-            treeName = load_objects_from_file(prefs.trees[cls]["model"], baseSize=prefs.scale)[0]
-            treeObject = bpy.data.objects.get(treeName)
-            treeCollection.objects.link(treeObject)
+            # Creating tree objects and linking them to the collection
+            for cls in prefs.trees:
+                load_tree_from_file(prefs.trees[cls]["model"], treeCollection, baseSize=prefs.scale)
 
         if TERRAIN_OBJECT in [obj.name for obj in bpy.data.objects]:
             create_geo_nodes(bpy.data.objects.get(TERRAIN_OBJECT))
@@ -423,6 +416,8 @@ def adjust_3d_view(object: bpy.types.Object) -> None:
     for area in areas:
         if area.type == "VIEW_3D":
             space = area.spaces.active
+            if dst < 10:
+                space.clip_start = 0.1
             if dst < 100:
                 space.clip_start = 1
             elif dst < 1000:
@@ -499,26 +494,21 @@ def create_world(name: str, texturePath: str) -> bpy.types.Object:
     return world
 
 
-def load_objects_from_file(filepath: str, baseSize: float = 1.0) -> List[str]:
+def load_tree_from_file(filepath: str, treeCollection: bpy.types.Collection, baseSize: float = 1.0) -> str:
     with bpy.data.libraries.load(filepath, link=False) as (src, dst):
-        dst.objects = [name for name in src.objects]
+        dst.objects = [src.objects[0]]
     
-    # Adding all the destination objects to the scene
-    names = []
-    for obj in dst.objects:
-        bpy.context.collection.objects.link(obj)
+    treeObject = dst.objects[0]
+    treeCollection.objects.link(treeObject)
 
-        # 'obj' is stale after linking, so regenerate
-        obj = bpy.data.objects[obj.name]
-        height = obj.dimensions.z
-        if height > 0:
-            obj.scale = tuple([baseSize / height] * 3)
-            print(f"Object scale set to {obj.scale}")
-        obj.rotation_euler = (0, 0, 0)
-        obj.hide_set(True)
-        names.append(obj.name)
+    height = treeObject.dimensions.z
+    if height > 0:
+        treeObject.scale = tuple([baseSize / height] * 3)
+        print(f"Object scale set to {treeObject.scale}")
+    treeObject.rotation_euler = (0, 0, 0)
+    treeObject.hide_set(True)
 
-    return names
+    return treeObject.name
 
 
 def create_geo_nodes(terrain: bpy.types.Object) -> bpy.types.Modifier:
@@ -606,19 +596,12 @@ def create_node_group() -> bpy.types.NodeGroup:
         links.new(groupInput.outputs[f"mask_{i}"], treeTexture.inputs["Image"])
         links.new(uvMapNode.outputs["Attribute"], treeTexture.inputs["Vector"])
 
-        clampMask = nodes.new("ShaderNodeMath")
-        clampMask.operation = "GREATER_THAN"
-        links.new(treeTexture.outputs["Color"], clampMask.inputs[0])
-        clampMask.inputs[1].default_value = 0.1
-
         tempDensityOutput = nodes.new("ShaderNodeMath")
         tempDensityOutput.operation = "ADD"
-        # links.new(treeTexture.outputs["Color"], tempDensityOutput.inputs[0])
-        links.new(clampMask.outputs["Value"], tempDensityOutput.inputs[0])
+        links.new(treeTexture.outputs["Color"], tempDensityOutput.inputs[0])
         tempIdentityOutput = nodes.new("ShaderNodeMath")
         tempIdentityOutput.operation = "MULTIPLY"
-        # links.new(treeTexture.outputs["Color"], tempIdentityOutput.inputs[0])
-        links.new(clampMask.outputs["Value"], tempIdentityOutput.inputs[0])
+        links.new(treeTexture.outputs["Color"], tempIdentityOutput.inputs[0])
         tempIdentityOutput.inputs[1].default_value = i
 
         if i == 0:
