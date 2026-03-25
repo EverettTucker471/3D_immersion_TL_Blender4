@@ -39,7 +39,7 @@ SUN_SHADOW: Final[int] = 1000
 # TREE PARAMETERS
 MIN_TREE_SCALE: Final[float] = 0.95  # Relative scale variation
 MAX_TREE_SCALE: Final[float] = 1.05  # Relative scale variation
-TREE_DENSITY: Final[int] = 500  # Count per m^2
+TREE_DENSITY: Final[int] = 200  # Count per m^2
 TREE_COLLECTION_NAME: Final[str] = "tree_collection"
 
 
@@ -71,18 +71,11 @@ class Prefs:
         self.scale = tlSettings["scale"]
 
         # Setting up tree models and textures
-        self.trees = {}
-        for cls in tlSettings["trees"]:
-            self.trees[cls] = {}
-            self.trees[cls]["model"] = os.path.join(
-                tlCoupling, tlSettings["trees"][cls]["model"]
-            )
-            self.trees[cls]["texture"] = os.path.join(
-                tlCoupling, tlSettings["trees"][cls]["texture"]
-            )
-        self.treeModelPath = os.path.join(
-            tlCoupling, tlSettings["terrain"]["grass_texture_file"]
-        )
+        self.trees = []
+        for tree in tlSettings["trees"]:
+            tree["model"] = os.path.join(tlCoupling, tree["model"])
+            tree["texture"] = os.path.join(tlCoupling, tree["texture"])
+            self.trees.append(tree)
 
 
 class Adapt:
@@ -289,8 +282,8 @@ class TL_OT_Assets(bpy.types.Operator):
             bpy.context.scene.collection.children.link(treeCollection)
 
             # Creating tree objects and linking them to the collection
-            for cls in prefs.trees:
-                load_tree_from_file(prefs.trees[cls]["model"], treeCollection, baseSize=prefs.scale)
+            for tree in prefs.trees:
+                load_tree_from_file(tree["model"], tree["name"], treeCollection, baseSize=prefs.scale)
 
         if TERRAIN_OBJECT in [obj.name for obj in bpy.data.objects]:
             create_geo_nodes(bpy.data.objects.get(TERRAIN_OBJECT))
@@ -494,11 +487,12 @@ def create_world(name: str, texturePath: str) -> bpy.types.Object:
     return world
 
 
-def load_tree_from_file(filepath: str, treeCollection: bpy.types.Collection, baseSize: float = 1.0) -> str:
+def load_tree_from_file(filepath: str, treeName: str, treeCollection: bpy.types.Collection, baseSize: float = 1.0) -> str:
     with bpy.data.libraries.load(filepath, link=False) as (src, dst):
         dst.objects = [src.objects[0]]
     
     treeObject = dst.objects[0]
+    treeObject.name = treeName
     treeCollection.objects.link(treeObject)
 
     height = treeObject.dimensions.z
@@ -524,8 +518,10 @@ def create_geo_nodes(terrain: bpy.types.Object) -> bpy.types.Modifier:
     
 
 def create_node_group() -> bpy.types.NodeGroup:
-    # The trees should already be in the scene, so grab them
-    treeObjNames = [obj.name for obj in bpy.data.objects if obj.name.startswith("Tree")]
+    # The trees should already be in the tree_collection, so grab them
+    treeCollection = bpy.data.collections.get(TREE_COLLECTION_NAME)
+    treeObjNames = [obj.name for obj in treeCollection.objects]
+    
     if not treeObjNames:
         print("No trees to create node group!")
         return None

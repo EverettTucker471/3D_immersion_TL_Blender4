@@ -7,24 +7,28 @@
 		"grass_texture_file": "textures/grass_final.jpg",
 		"sides_texture_file": "textures/dirt.jpg"
 	},
-	"trees": {
-		"class4": {
-			"model": "assets/river_birch_tree.blend",
-			"texture": "patch_class4.png"
-		},
-		"class1": {
-			"model": "assets/river_birch_tree.blend",
+	"trees": [
+		{
+			"name": "Palm Fern Tree",
+			"model": "assets/palm_fern_tree.blend",
 			"texture": "patch_class1.png"
 		},
-		"class2": {
-			"model": "assets/river_birch_tree.blend",
+		{
+			"name": "Meyer Lemon Tree",
+			"model": "assets/meyer_lemon_tree.blend",
 			"texture": "patch_class2.png"
 		},
-		"class3": {
-			"model": "assets/river_birch_tree.blend",
+		{
+			"name": "Evergreen Tree",
+			"model": "assets/evergreen_tree.blend",
 			"texture": "patch_class3.png"
+		},
+		{
+			"name": "River Birch Tree",
+			"model": "assets/river_birch_tree.blend",
+			"texture": "patch_class4.png"
 		}
-	},
+	],
 	"trail": {
 		"profile": "assets/T_profile.blend",
 		"texture_file": "textures/boardwalk.png"
