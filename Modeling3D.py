@@ -28,7 +28,7 @@ VIEW_INCREASE_FACTOR: Final[int] = 5
 SUN_INCREASE_FACTOR: Final[int] = 2
 TEXTURE_MAPPING_SCALE: Final[int] = 3
 TERRAIN_ROUGHNESS: Final[float] = 0.8
-SLOPE_LIMIT: Final[float] = 0.7  # Limit for defining what counts as a side
+SLOPE_LIMIT: Final[float] = 0.8  # Limit for defining what counts as a side
 
 # Initial Parameters for the Sun
 SUN_ENERGY: Final[int] = 2
@@ -39,7 +39,6 @@ SUN_SHADOW: Final[int] = 1000
 # TREE PARAMETERS
 MIN_TREE_SCALE: Final[float] = 0.95  # Relative scale variation
 MAX_TREE_SCALE: Final[float] = 1.05  # Relative scale variation
-TREE_DENSITY: Final[int] = 200  # Count per m^2
 TREE_COLLECTION_NAME: Final[str] = "tree_collection"
 
 
@@ -68,7 +67,8 @@ class Prefs:
         # Coordinate Reference System and other configs
         self.CRS = "EPSG:" + tlSettings["CRS"]
         self.timer = tlSettings["timer"]
-        self.scale = tlSettings["scale"]
+        self.scale = tlSettings["treeScale"]
+        self.treeDensity = tlSettings["treeDensity"]
 
         # Setting up tree models and textures
         self.trees = []
@@ -87,6 +87,7 @@ class Adapt:
         self.plane = TERRAIN_OBJECT
         self.texture = TEXTURE_PATH
         self.dimensions = None
+        self.prefs = Prefs()
     
     def terrainChange(self, path: str, CRS: int) -> None:
         """Called to update the blender terrain"""
@@ -96,6 +97,7 @@ class Adapt:
         remove_object(self.plane)  # Removing previous import
 
         # Bringing in the new terrain data
+        print(f'Importing with CRS: {CRS}')
         bpy.ops.importgis.georaster(
             filepath=path,
             importMode="DEM",
@@ -128,23 +130,23 @@ class Adapt:
         # If the terrain has changed between tree updates
         geoMod = terrain.modifiers.get("tree_mod")
         if not geoMod:
-            geoMod = create_geo_nodes(terrain)
+            geoMod = create_geo_nodes(terrain, self.prefs.treeDensity)
     
         for patchFile in patchFiles:
             path = os.path.join(watchFolder, patchFile)
-            patchType = int(os.path.splitext(patchFile)[0].split("_class")[1])
 
-            if bpy.data.images.get(patchFile):
-                bpy.data.images.remove(bpy.data.images[patchFile])
-            image = bpy.data.images.load(path)
-            image.pack()
+            for i, tree in enumerate(self.prefs.trees):
+                if tree["texture"].endswith(patchFile):
+                    if bpy.data.images.get(patchFile):
+                        bpy.data.images.remove(bpy.data.images[patchFile])
+                    image = bpy.data.images.load(path)
+                    image.pack()
 
-            # Inputting the image to the geometry node
-            # Socket_1 is terrain, like base_cat = [1]
-            geoMod[f"Socket_{patchType}"] = image
-            os.remove(path)
+                    # Offset by 1 because the terrain is Socket_0
+                    geoMod[f"Socket_{i + 2}"] = image
+                    os.remove(path)
+                    break
 
-        
 
 class ModalTimerOperator(bpy.types.Operator):
     """Extends Blender Operator which runs interactively from a timer"""
@@ -286,7 +288,7 @@ class TL_OT_Assets(bpy.types.Operator):
                 load_tree_from_file(tree["model"], tree["name"], treeCollection, baseSize=prefs.scale)
 
         if TERRAIN_OBJECT in [obj.name for obj in bpy.data.objects]:
-            create_geo_nodes(bpy.data.objects.get(TERRAIN_OBJECT))
+            create_geo_nodes(bpy.data.objects.get(TERRAIN_OBJECT), prefs.treeDensity)
         else:
             # Delay creation of geo node modifier
             print("Warning: No Terrain")
@@ -488,12 +490,13 @@ def create_world(name: str, texturePath: str) -> bpy.types.Object:
 
 
 def load_tree_from_file(filepath: str, treeName: str, treeCollection: bpy.types.Collection, baseSize: float = 1.0) -> str:
-    with bpy.data.libraries.load(filepath, link=False) as (src, dst):
-        dst.objects = [src.objects[0]]
+    bpy.ops.import_scene.gltf(filepath=filepath)
     
-    treeObject = dst.objects[0]
+    treeObject = bpy.context.active_object
     treeObject.name = treeName
     treeCollection.objects.link(treeObject)
+
+    bpy.data.collections["Collection"].objects.unlink(treeObject)  # Unlinking from main collection
 
     height = treeObject.dimensions.z
     if height > 0:
@@ -505,11 +508,11 @@ def load_tree_from_file(filepath: str, treeName: str, treeCollection: bpy.types.
     return treeObject.name
 
 
-def create_geo_nodes(terrain: bpy.types.Object) -> bpy.types.Modifier:
+def create_geo_nodes(terrain: bpy.types.Object, treeDensity: float) -> bpy.types.Modifier:
     # Create node group if it doesn't exist
     nodeGroup = bpy.data.node_groups.get("tree_geo_group")
     if not nodeGroup:
-        nodeGroup = create_node_group()
+        nodeGroup = create_node_group(treeDensity)
 
     geoMod = terrain.modifiers.new(name="tree_mod", type="NODES")
     geoMod.node_group = nodeGroup
@@ -517,7 +520,8 @@ def create_geo_nodes(terrain: bpy.types.Object) -> bpy.types.Modifier:
     return geoMod
     
 
-def create_node_group() -> bpy.types.NodeGroup:
+def create_node_group(treeDensity: float) -> bpy.types.NodeGroup:
+    print("Creating Node Group - Heavy Call!")
     # The trees should already be in the tree_collection, so grab them
     treeCollection = bpy.data.collections.get(TREE_COLLECTION_NAME)
     treeObjNames = [obj.name for obj in treeCollection.objects]
@@ -616,7 +620,7 @@ def create_node_group() -> bpy.types.NodeGroup:
     # Adding a density scaler for the density mask
     densityScaler = nodes.new("ShaderNodeMath")
     densityScaler.operation = "MULTIPLY"
-    densityScaler.inputs[0].default_value = TREE_DENSITY
+    densityScaler.inputs[0].default_value = treeDensity
     links.new(currentDensityOutput.outputs["Value"], densityScaler.inputs[1])
 
     # Adding in the distribute node
