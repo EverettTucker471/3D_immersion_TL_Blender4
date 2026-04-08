@@ -28,7 +28,7 @@ VIEW_INCREASE_FACTOR: Final[int] = 5
 SUN_INCREASE_FACTOR: Final[int] = 2
 TEXTURE_MAPPING_SCALE: Final[int] = 3
 TERRAIN_ROUGHNESS: Final[float] = 0.8
-SLOPE_LIMIT: Final[float] = 0.8  # Limit for defining what counts as a side
+SLOPE_LIMIT: Final[float] = 0.85  # Limit for defining what counts as a side
 
 # Initial Parameters for the Sun
 SUN_ENERGY: Final[int] = 2
