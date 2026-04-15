@@ -146,6 +146,7 @@ class Adapt:
                     geoMod[f"Socket_{i + 2}"] = image
                     os.remove(path)
                     break
+        terrain.update_tag()  # Recalculating the geoNode modifier
 
 
 class ModalTimerOperator(bpy.types.Operator):
