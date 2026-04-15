@@ -41,6 +41,7 @@ classes = (
     Modeling3D.ModalTimerOperator,
     Modeling3D.TL_OT_Assets,
     Modeling3D.TL_PT_GUI,
+    Modeling3D.TL_OT_ClearTrees,
     Modeling3D.MessageOperator,
     prefs.TL_OT_PREFS_SHOW,
     prefs.TL_PREFS,

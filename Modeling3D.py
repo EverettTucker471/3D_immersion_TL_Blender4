@@ -175,7 +175,7 @@ class ModalTimerOperator(bpy.types.Operator):
                     # Trees update
                     patchFiles = []
                     for f in fileList:
-                        if f.startswith("patch_") and f.endswith(".png"):
+                        if f in [tree["texture"].split("/")[-1] for tree in self.prefs.trees]:
                             patchFiles.append(f)
                     if patchFiles:
                         self.adapt.trees(patchFiles, self.prefs.watchFolder)
@@ -234,6 +234,31 @@ class TL_PT_GUI(bpy.types.Panel):
         row.operator(
             "wm.modal_timer_operator", text="Turn on Watch Mode", icon="GHOST_ENABLED"
         )
+        row = box.row(align=True)
+        row.operator("tl.clear_trees", text="Clear Trees", icon="REMOVE")
+
+
+class TL_OT_ClearTrees(bpy.types.Operator):
+    """Clear the patch files from the geometry nodes and clear the trees"""
+
+    # Blender superclass variables
+    bl_idname = "tl.clear_trees"
+    bl_label = "Clear Trees"
+
+    def execute(self, context: bpy.types.Context) -> Dict:
+        trees = Prefs().trees
+        terrain = bpy.data.objects.get(TERRAIN_OBJECT)
+
+        if terrain:
+            geoMod = terrain.modifiers.get("tree_mod")
+            if geoMod:
+                for i in range(len(trees)):
+                    geoMod[f"Socket_{i + 2}"] = None
+                terrain.update_tag()  # Refreshing the modifier
+                return {"FINISHED"}
+        
+        print("No trees to clear")
+        return {"CANCELLED"}
 
 
 class TL_OT_Assets(bpy.types.Operator):
