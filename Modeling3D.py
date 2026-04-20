@@ -22,6 +22,8 @@ from typing import Final, Tuple, Dict, List
 # Static File Paths
 WATCH_NAME: Final[str] = "Watch"
 TERRAIN_FILE: Final[str] = "terrain.tif"
+WATER_FILE: Final[str] = "water.tif"
+WATER_OBJECT: Final[str] = "water"
 TERRAIN_OBJECT: Final[str] = "terrain"
 TEXTURE_PATH: Final[str] = "texture.tif"
 VIEW_INCREASE_FACTOR: Final[int] = 5
@@ -54,11 +56,15 @@ class Prefs:
         tlCoupling = tlSettings["folder"]
         self.watchFolder = os.path.join(tlCoupling, WATCH_NAME)
         self.terrainPath = os.path.join(self.watchFolder, TERRAIN_FILE)
+        self.waterPath = os.path.join(self.watchFolder, WATER_FILE)
         self.terrainTexturePath = os.path.join(
             tlCoupling, tlSettings["terrain"]["grass_texture_file"]
         )
         self.terrainSidesPath = os.path.join(
             tlCoupling, tlSettings["terrain"]["sides_texture_file"]
+        )
+        self.waterTexturePath = os.path.join(
+            tlCoupling, tlSettings["water"]["texture_file"]
         )
         self.worldTexturePath = os.path.join(
             tlCoupling, tlSettings["world"]["texture_file"]
@@ -85,6 +91,7 @@ class Adapt:
     """
     def __init__(self):
         self.plane = TERRAIN_OBJECT
+        self.depressions = WATER_OBJECT
         self.texture = TEXTURE_PATH
         self.dimensions = None
         self.prefs = Prefs()
@@ -110,7 +117,7 @@ class Adapt:
         select_only(self.plane)
         bpy.ops.object.convert(target="MESH")
 
-        # Add sides to the terrain
+        # Add sides and materials to the terrain
         self.dimensions = bpy.data.objects[self.plane].dimensions
         add_side(self.plane, "terrain_sides_material")
         # Removing the terrain file
@@ -149,6 +156,34 @@ class Adapt:
         terrain.update_tag()  # Recalculating the geoNode modifier
 
 
+    def waterChange(self, path: str, CRS: str) -> None:
+        # Removing the old water object and importing a new one
+        remove_object(self.depressions)
+
+        try:
+            bpy.ops.importgis.georaster(
+                filepath=path,
+                importMode="DEM",
+                subdivision="mesh",
+                step=2,
+                rastCRS=CRS,
+            )
+        except Exception:
+            pass
+
+        # Converting to a real mesh
+        select_only(self.depressions)
+        bpy.ops.object.convert(target="MESH")
+
+        # Updating water texture
+        water = bpy.data.objects.get(self.depressions)
+        waterMaterial = bpy.data.materials.get("water_material")
+        water.data.materials.append(waterMaterial)
+
+        # Removing the water file
+        os.remove(path)
+
+
 class ModalTimerOperator(bpy.types.Operator):
     """Extends Blender Operator which runs interactively from a timer"""
 
@@ -172,6 +207,10 @@ class ModalTimerOperator(bpy.types.Operator):
                     # Terrain update
                     if TERRAIN_FILE in fileList:
                         self.adapt.terrainChange(self.prefs.terrainPath, self.prefs.CRS)
+                    
+                    # Water Update
+                    if WATER_FILE in fileList:
+                        self.adapt.waterChange(self.prefs.waterPath, self.prefs.CRS)
                     
                     # Trees update
                     patchFiles = []
@@ -283,6 +322,13 @@ class TL_OT_Assets(bpy.types.Operator):
             name="terrain_sides_material",
             texturePath=prefs.terrainSidesPath,
             sides=True,
+        )
+
+        # Creating water
+        create_terrain_material(
+            name="water_material",
+            texturePath=prefs.waterTexturePath,
+            sides=False,
         )
 
         create_world(name="TL_world", texturePath=prefs.worldTexturePath)

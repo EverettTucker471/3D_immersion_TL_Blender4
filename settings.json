@@ -8,6 +8,9 @@
 		"grass_texture_file": "textures/grass_final.jpg",
 		"sides_texture_file": "textures/dirt.jpg"
 	},
+	"water": {
+		"texture_file": "textures/water_final.jpg"
+	},
 	"trees": [
 		{
 			"name": "Tree Asset 1",
