@@ -15,22 +15,29 @@
 		{
 			"name": "Tree Asset 1",
 			"model": "assets/tree_1.glb",
-			"texture": "patch_class_1.png"
+			"input": "patch_class_1.png"
 		},
 		{
 			"name": "Tree Asset 2",
 			"model": "assets/low_poly_tree_2.glb",
-			"texture": "patch_class_2.png"
+			"input": "patch_class_2.png"
 		},
 		{
 			"name": "Tree Asset 3",
 			"model": "assets/low_poly_pine_2.glb",
-			"texture": "patch_class_3.png"
+			"input": "patch_class_3.png"
 		},
 		{
 			"name": "Tree Asset 4",
 			"model": "assets/low_poly_pine_2.glb",
-			"texture": "patch_class_4.png"
+			"input": "patch_class_4.png"
+		}
+	],
+	"pois": [
+		{
+			"name": "Marker",
+			"model": "assets/low_poly_pine_2.glb",
+			"input": "points_of_interest.shp"
 		}
 	],
 	"trail": {
