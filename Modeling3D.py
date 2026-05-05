@@ -18,8 +18,8 @@ from .settings import getSettings
 from bpy.props import StringProperty
 from mathutils import Vector
 from typing import Final, Tuple, Dict, List
-from tree_geo_nodes import create_tree_geo_nodes
-from poi_geo_nodes import create_poi_geo_nodes
+from .tree_geo_nodes import create_tree_geo_nodes
+from .poi_geo_nodes import create_poi_geo_nodes
 
 # Static File Paths
 WATCH_NAME: Final[str] = "Watch"
@@ -198,23 +198,34 @@ class Adapt:
 
     def pointOfInterestChange(self, poiFiles: List[str], watchFolder: str):
         terrain = bpy.data.objects.get(self.plane)
+        
+        # Possibly creating and then grabbing the instance collection
+        if POI_INSTANCE_COLLECTION_NAME in bpy.data.collections:
+            poiCollection = bpy.data.collections[POI_INSTANCE_COLLECTION_NAME]
+        else:
+            poiCollection = bpy.data.collections.new(POI_INSTANCE_COLLECTION_NAME)
+            bpy.context.scene.collection.children.link(poiCollection)
 
         # If the terrain has changed between POI updates
-        geoMod = terrain.modifiers.get("tree_mod")
+        geoMod = terrain.modifiers.get("poi_mod")
         if not geoMod:
-            geoMod = create_tree_geo_nodes(terrain, self.prefs.treeDensity)
-        
-        # Possible creating and then grabbing the instance collection
-        if POI_INSTANCE_COLLECTION_NAME not in bpy.data.collections:
-            treeCollection = bpy.data.collections.new(TREE_COLLECTION_NAME)
-            bpy.context.scene.collection.children.link(treeCollection)
-        poiCollection = bpy.data.collections[POI_INSTANCE_COLLECTION_NAME]
+            geoMod = create_poi_geo_nodes(terrain)
 
         for poiFile in poiFiles:
             path = os.path.join(watchFolder, poiFile)
 
             for poi in self.prefs.pois:
                 if poi["input"].endswith(poiFile):
+                    # Trimming off the path and file extension
+                    poiName = poi["input"][poi["input"].rfind('/')+1:poi["input"].rfind('.')]
+                    print(f"Importing POI with name: {poiName}")
+
+                    # Unlinking and removing old objects before import
+                    if poiName in poiCollection.objects:
+                        poiCollection.objects.unlink(bpy.data.objects.get(poiName))
+                        remove_object(poiName)
+
+                    # Importing the POI points as a shapefile
                     bpy.ops.importgis.shapefile(
                         "EXEC_DEFAULT",                
                         filepath=path,
@@ -223,14 +234,14 @@ class Adapt:
                         separateObjects=False,
                     )
 
-                    select_only(poi["name"])
+                    # Adding the POI to the correct collection
+                    select_only(poiName)
                     bpy.ops.object.convert(target="MESH")
-                    poiObj = bpy.data.objects.get(poi["name"])
-
-                    if poi["name"] in poiCollection.objects:
-                        poiCollection.objects.unlink(poiObj)
-                        remove_object(poi["name"])  # Removing the old object
+                    poiObj = bpy.data.objects.get(poiName)
                     poiCollection.objects.link(poiObj)
+
+                    # Removing the poi file
+                    os.remove(path)
 
         terrain.update_tag()  # Recalculating the geoNode modifier
 
@@ -425,15 +436,16 @@ class TL_OT_Assets(bpy.types.Operator):
         
         # Instantiate the models alphabetically so they remain in sorted order
         for i, poi in enumerate(prefs.pois):
-            load_tree_from_file(poi["model"], f"POI{i} - {poi["name"]}", poiCollection, baseSize=prefs.scale)
+            load_poi_from_file(poi["model"], f"POI{i} - {poi['name']}", poiCollection, baseSize=prefs.scale)
         
         # Creating the geometry node system for the trees and pois, if we can
         if TERRAIN_OBJECT in [obj.name for obj in bpy.data.objects]:
             create_tree_geo_nodes(bpy.data.objects.get(TERRAIN_OBJECT), prefs.treeDensity)
+            create_poi_geo_nodes(bpy.data.objects.get(TERRAIN_OBJECT))
         else:
             # Delay creation of geo node modifier
             print("Warning: No Terrain")
-            print("Geometry nodes will be initialized later")
+            print("Geometry nodes will be initialized at initial update")
 
         return {"FINISHED"}
 
@@ -655,6 +667,17 @@ def load_poi_from_file(filepath: str, poiName: str, poiCollection: bpy.types.Col
     poiObject = bpy.context.active_object
     poiObject.name = poiName
     poiCollection.objects.link(poiObject)
+
+    bpy.data.collections["Collection"].objects.unlink(poiObject)  # Unlinking from the main collection
+
+    height = poiObject.dimensions.z
+    if height > 0:
+        poiObject.scale = tuple([baseSize / height] * 3)
+        print(f"POI Object scale set to {poiObject.scale}")
+    poiObject.rotation_euler = (0, 0, 0)
+    poiObject.hide_set(True)
+
+    return poiObject.name
 
 
 
